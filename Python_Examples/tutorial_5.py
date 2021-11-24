@@ -157,14 +157,14 @@ print("Mission running ", end=' ')
 
 # Possible solution for challenge set in tutorial_4.py:
 
-#agent_host.sendCommand("hotbar.9 1") #Press the hotbar key
-#agent_host.sendCommand("hotbar.9 0") #Release hotbar key - agent should now be holding diamond_pickaxe
+agent_host.sendCommand("hotbar.9 1") #Press the hotbar key
+agent_host.sendCommand("hotbar.9 0") #Release hotbar key - agent should now be holding diamond_pickaxe
 
-#agent_host.sendCommand("pitch 0.2") #Start looking downward slowly
-#time.sleep(1)                        #Wait a second until we are looking in roughly the right direction
-#agent_host.sendCommand("pitch 0")    #Stop tilting the camera
-#agent_host.sendCommand("move 1")     #And start running...
-#agent_host.sendCommand("attack 1")   #Whilst flailing our pickaxe!
+agent_host.sendCommand("pitch 0.2") #Start looking downward slowly
+time.sleep(1)                        #Wait a second until we are looking in roughly the right direction
+agent_host.sendCommand("pitch 0")    #Stop tilting the camera
+agent_host.sendCommand("move 1")     #And start running...
+agent_host.sendCommand("attack 1")   #Whilst flailing our pickaxe!
 
 # Loop until mission ends:
 while world_state.is_mission_running:
@@ -178,6 +178,10 @@ while world_state.is_mission_running:
         observations = json.loads(msg)                          # and parse the JSON
         grid = observations.get(u'floor3x3', 0)                 # and get the grid we asked for
         # ADD SOME CODE HERE TO SAVE YOUR AGENT
+        if (grid[3] == 'lava'):
+            agent_host.sendCommand("jump 1")
+        else:
+            agent_host.sendCommand("jump 0")
 print()
 print("Mission ended")
 # Mission has ended.

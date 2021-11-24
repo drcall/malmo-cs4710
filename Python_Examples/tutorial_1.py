@@ -74,6 +74,10 @@ while not world_state.has_mission_begun:
 print()
 print("Mission running ", end=' ')
 
+agent_host.sendCommand("pitch 1")
+time.sleep(1)
+agent_host.sendCommand("attack 1")
+
 # Loop until mission ends:
 while world_state.is_mission_running:
     print(".", end="")

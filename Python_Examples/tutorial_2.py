@@ -42,8 +42,18 @@ missionXML='''<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
               </About>
               
               <ServerSection>
+                <ServerInitialConditions>
+                  <Time>
+                    <StartTime>12000</StartTime>
+                    <AllowPassageOfTime>false</AllowPassageOfTime>
+                  </Time>
+                  <Weather>rain</Weather>
+                </ServerInitialConditions>
                 <ServerHandlers>
-                  <FlatWorldGenerator generatorString="3;7,220*1,5*3,2;3;,biome_1"/>
+                  <FlatWorldGenerator generatorString="3;7,44*49,73,35:1,159:4,95:13,35:13,159:11,95:10,159:14,159:6,35:6,95:6;12;,biome_1"/>
+                  <DrawingDecorator>
+                    <DrawSphere x="-27" y="70" z="0" radius="30" type="air"/>
+                  </DrawingDecorator>
                   <ServerQuitFromTimeUp timeLimitMs="30000"/>
                   <ServerQuitWhenAnyAgentFinishes/>
                 </ServerHandlers>
@@ -51,7 +61,12 @@ missionXML='''<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
               
               <AgentSection mode="Survival">
                 <Name>MalmoTutorialBot</Name>
-                <AgentStart/>
+                <AgentStart>
+                  <Placement x="0" y="56" z="0" yaw="90" />
+                  <Inventory>
+                    <InventoryItem slot="0" type="diamond_pickaxe" />
+                  </Inventory>
+                </AgentStart>
                 <AgentHandlers>
                   <ObservationFromFullStats/>
                   <ContinuousMovementCommands turnSpeedDegs="180"/>

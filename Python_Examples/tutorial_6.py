@@ -61,15 +61,28 @@ class TabQAgent(object):
         self.q_table = {}
         self.canvas = None
         self.root = None
+        self.learning_rate = 0.5
+        self.discount = 0.5
+
+    def findMaxSuccessorQ(self, current_state):
+        max_q = float("-inf")
+        for action in range(len(self.actions)):
+            q_value = self.q_table[current_state][action]
+            if (q_value > max_q):
+                max_q = q_value
+
+        return max_q
 
     def updateQTable( self, reward, current_state ):
         """Change q_table to reflect what we have learnt."""
         
         # retrieve the old action value from the Q-table (indexed by the previous state and the previous action)
         old_q = self.q_table[self.prev_s][self.prev_a]
+
+        print(current_state)
         
         # TODO: what should the new action value be?
-        new_q = old_q
+        new_q = (1-self.learning_rate) * old_q + (self.learning_rate) * (reward + self.discount * self.findMaxSuccessorQ(current_state))
         
         # assign the new action value to the Q-table
         self.q_table[self.prev_s][self.prev_a] = new_q
@@ -81,7 +94,7 @@ class TabQAgent(object):
         old_q = self.q_table[self.prev_s][self.prev_a]
         
         # TODO: what should the new action value be?
-        new_q = old_q
+        new_q = (1-self.learning_rate) * old_q + (self.learning_rate) * (reward)
         
         # assign the new action value to the Q-table
         self.q_table[self.prev_s][self.prev_a] = new_q
