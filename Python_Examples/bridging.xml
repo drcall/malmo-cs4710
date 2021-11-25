@@ -18,7 +18,7 @@
         <DrawCuboid x1="-3" y1="26" z1="-3" x2="-3" y2="46" z2="14" type="stone" />
         <DrawCuboid x1="-2" y1="26" z1="-3" x2="10" y2="46" z2="-3" type="stone" />
         <DrawCuboid x1="-2" y1="26" z1="14" x2="10" y2="46" z2="14" type="stone" />
-        <DrawBlock x="4"  y="31" z="1" type="stone" />    <!-- the starting marker -->
+        <DrawBlock x="4"  y="31" z="1" type="gold_block" />    <!-- the starting marker -->
         <DrawBlock x="4"  y="31" z="11" type="lapis_block" />     <!-- the destination marker -->
       </DrawingDecorator>
       <ServerQuitFromTimeUp timeLimitMs="20000"/>
@@ -30,9 +30,18 @@
     <Name>Agent</Name>
     <AgentStart>
       <Placement x="4.5" y="32" z="1.5" pitch="30" yaw="0"/>
+      <Inventory>
+        <InventoryItem slot="0" type="stone" quantity="64"/>
+      </Inventory>
     </AgentStart>
     <AgentHandlers>
       <DiscreteMovementCommands/>
+      <ObservationFromGrid>
+        <Grid name="floor3x3">
+          <min x="-1" y="-1" z="-1"/>
+          <max x="1" y="-1" z="1"/>
+        </Grid>
+      </ObservationFromGrid>
       <ObservationFromFullStats/>
       <RewardForTouchingBlockType>
         <Block reward="-100.0" type="lava" behaviour="onceOnly"/>

@@ -25,6 +25,7 @@ import MalmoPython
 import os
 import sys
 import time
+import json
 
 if sys.version_info[0] == 2:
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)  # flush print output immediately
@@ -83,6 +84,12 @@ while world_state.is_mission_running:
     print(".", end="")
     time.sleep(0.1)
     world_state = agent_host.getWorldState()
+    if world_state.number_of_observations_since_last_state > 0: # Have any observations come in?
+        msg = world_state.observations[-1].text                 # Yes, so get the text
+        observations = json.loads(msg)                          # and parse the JSON
+        print(observations)
+        grid = observations.get(u'floor3x3', 0)
+        #print(grid)
     for error in world_state.errors:
         print("Error:",error.text)
 
