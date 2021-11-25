@@ -154,14 +154,21 @@ print("Mission running ", end=' ')
 agent_host.sendCommand("hotbar.9 1")
 agent_host.sendCommand("hotbar.9 0")
 
-policy = ["crouch 1", "turn 0.25 180", "pitch 0.25 83", "move -1 1.5", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use", "move -1 1", "use"]
+policy = ["crouch 1", "turn 0.3 180", "pitch 0.25 83", "move -1 2"]
+#policy = ["crouch 1", "move -1 1"]
+for i in range(51):
+    policy.append("use")
+    policy.append("move -1 1")
+
+policy.append("pitch -0.25 83")
+
 cmdIndex = 0
 action_executing = False
 initial = None
 prev = None
+crouching = False
 rotations = 0
 cycles = 0
-CYCLE_LIMIT = 100
 
 # Loop until mission ends:
 while world_state.is_mission_running:
@@ -181,6 +188,7 @@ while world_state.is_mission_running:
         elif not action_executing:
             action_executing = True
             print("End of policy execution, stalling...")
+            agent_host.sendCommand("quit")
 
         type = cmd[0]
         if type == 'move':
@@ -190,7 +198,8 @@ while world_state.is_mission_running:
             # Get command parameters
             speed = cmd[1]
             dist = float(cmd[2])
-            correction_factor = 1.186 * abs(float(speed))
+            correction_factor = (1.186 if not crouching else 0.3696) * abs(float(speed))
+            CYCLE_LIMIT = 20 * dist
 
             if not action_executing:
                 action_executing = True
@@ -199,20 +208,23 @@ while world_state.is_mission_running:
                 if (float(speed) == 0 and dist != 0):
                     raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
             else:
+                cycles += 1
                 if math.hypot(initial[0]-agent_coordinates[0], initial[1]-agent_coordinates[1]) >= dist or cycles > CYCLE_LIMIT:
                     agent_host.sendCommand("move 0")
                     action_executing = False
+                    cycles = 0
                     initial = None
                     cmdIndex += 1
         elif type == 'crouch':
             param = cmd[1]
             agent_host.sendCommand("crouch " + param)
+            crouching = True if 1 else False
             cmdIndex += 1
         elif type == 'pitch':
             pitch = agent_info[u'Pitch']
             speed = cmd[1]
             dist = float(cmd[2])
-            correction_factor = 22.3576*float(speed)+0.3533
+            correction_factor = 22.3576*0.05
 
             if not action_executing:
                 action_executing = True
@@ -226,13 +238,19 @@ while world_state.is_mission_running:
                     action_executing = False
                     initial = None
                     cmdIndex += 1
+                elif abs(pitch - initial) >= dist - 15:
+                    if pitch - initial > 0:
+                        agent_host.sendCommand("pitch 0.05")
+                    else:
+                        agent_host.sendCommand("pitch -0.05")
+                    
         elif type == 'turn':
             yaw = agent_info[u'Yaw']
             absYaw = yaw if yaw > 0 else yaw + 360
             speed = cmd[1]
             speed_num = float(speed)
             dist = float(cmd[2])
-            correction_factor = 26.9576*speed_num
+            correction_factor = 26.9576*0.1
 
             if not action_executing:
                 action_executing = True
@@ -251,6 +269,11 @@ while world_state.is_mission_running:
                     initial = None
                     rotations = 0
                     cmdIndex += 1
+                elif(absYaw + rotations*360 >= initial - 15 and speed_num > 0) or (absYaw + rotations*360 <= initial + 15 and speed_num < 0):
+                    if speed_num > 0:
+                        agent_host.sendCommand("turn 0.1")
+                    else:
+                        agent_host.sendCommand("turn -0.1")
             prev = absYaw
         elif type == 'use':
             agent_host.sendCommand("use 1")
