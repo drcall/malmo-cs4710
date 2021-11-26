@@ -22,10 +22,55 @@ from __future__ import print_function
 
 from builtins import range
 import MalmoPython
+from past.utils import old_div
 import os
 import sys
 import time
 import json
+import tkinter as tk
+import math
+
+CANVAS_WIDTH = 390
+CANVAS_HEIGHT = 540
+ZERO_X = 11
+ZERO_Y = -2
+
+visited_list = []
+
+def blockX(x):
+    act_x = math.floor(ZERO_X - x)
+    return act_x * 30
+
+def blockY(y):
+    act_y = math.floor(y) - ZERO_Y
+    return (CANVAS_HEIGHT - act_y * 30) - 30
+
+
+
+root = tk.Tk()
+root.wm_title("Agent Tracker")
+
+canvas = tk.Canvas(root, width=CANVAS_WIDTH, height=CANVAS_HEIGHT, borderwidth=0, highlightthickness=0, bg="black")
+canvas.pack()
+root.update()
+
+def updateBlocks(xpos, ypos, stone):
+    canvas.delete('all')
+    if stone:
+        current_block = (blockX(xpos), blockY(ypos), blockX(xpos)+30, blockY(ypos)+30)
+        if current_block not in visited_list:
+            visited_list.append(current_block)
+    for block in visited_list:
+        canvas.create_rectangle(block[0], block[1], block[2], block[3], fill="grey")
+
+    canvas.create_rectangle(180, 420, 210, 450, fill="yellow")
+    canvas.create_rectangle(180, 90, 210, 120, fill="blue")
+    real_x = (ZERO_X - x) * 30
+    real_y = (CANVAS_HEIGHT - (y - ZERO_Y) * 30)
+    canvas.create_oval(real_x - 10, real_y - 10, real_x + 10, real_y + 10, fill="red")
+    #print("Block at: ", blockX(xpos), blockY(ypos), blockX(xpos)+30, blockY(ypos)+30)
+    root.update()
+
 
 if sys.version_info[0] == 2:
     sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)  # flush print output immediately
@@ -87,8 +132,13 @@ while world_state.is_mission_running:
     if world_state.number_of_observations_since_last_state > 0: # Have any observations come in?
         msg = world_state.observations[-1].text                 # Yes, so get the text
         observations = json.loads(msg)                          # and parse the JSON
-        print(observations)
-        grid = observations.get(u'floor3x3', 0)
+        grid = observations['floor3x3']
+        distance = observations['distanceFromend']
+        x = observations["XPos"]
+        y = observations["ZPos"]
+
+        updateBlocks(x, y, grid[4]=="stone")
+        #print(distance)
         #print(grid)
     for error in world_state.errors:
         print("Error:",error.text)
