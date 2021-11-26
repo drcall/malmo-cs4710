@@ -116,7 +116,7 @@ print("Waiting for the mission to start ", end=' ')
 world_state = agent_host.getWorldState()
 while not world_state.has_mission_begun:
     print(".", end="")
-    time.sleep(0.1)
+    time.sleep(0.01)
     world_state = agent_host.getWorldState()
     for error in world_state.errors:
         print("Error:",error.text)
@@ -124,22 +124,154 @@ while not world_state.has_mission_begun:
 print()
 print("Mission running ", end=' ')
 
+policy = ["crouch 1", "turn 0.5 180", "pitch 0.25 83"]
+
+for i in range(10):
+    policy.append("move -1 1")
+    policy.append("use")
+
+policy.append("pitch -0.25 38")
+policy.append("turn 0.5 180")
+policy.append("crouch 0")
+policy.append("move 1 1")
+
+cmdIndex = 0
+action_executing = False
+initial = None
+prev = None
+crouching = False
+rotations = 0
+cycles = 0
+
 # Loop until mission ends:
 while world_state.is_mission_running:
-    print(".", end="")
-    time.sleep(0.1)
+    time.sleep(0.01)
     world_state = agent_host.getWorldState()
     if world_state.number_of_observations_since_last_state > 0: # Have any observations come in?
         msg = world_state.observations[-1].text                 # Yes, so get the text
-        observations = json.loads(msg)                          # and parse the JSON
-        grid = observations['floor3x3']
-        distance = observations['distanceFromend']
-        x = observations["XPos"]
-        y = observations["ZPos"]
+        agent_info = json.loads(msg)                          # and parse the JSON
+        grid = agent_info['floor3x3']
+        distance = agent_info['distanceFromend']
+        x = agent_info["XPos"]
+        y = agent_info["ZPos"]
 
         updateBlocks(x, y, grid[4]=="stone")
         #print(distance)
         #print(grid)
+
+        cmd = ['stall']
+        if cmdIndex < len(policy):
+            cmd = policy[cmdIndex].split() # Get next action in policy, otherwise stall
+            if not action_executing:
+                print("Executing command: " + policy[cmdIndex])
+        elif not action_executing:
+            action_executing = True
+            print("End of policy execution, stalling...")
+            agent_host.sendCommand("quit")
+
+        type = cmd[0]
+        if type == 'move':
+            # Get info about the user's current position
+            agent_coordinates = [x, y]
+            
+            # Get command parameters
+            speed = cmd[1]
+            dist = float(cmd[2])
+            correction_factor = (1.186 if not crouching else 0.3696) * abs(float(speed))
+            CYCLE_LIMIT = 20 * dist
+
+            if not action_executing:
+                action_executing = True
+                initial = agent_coordinates
+                agent_host.sendCommand("move " + speed)
+                if (float(speed) == 0 and dist != 0):
+                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
+            else:
+                cycles += 1
+                if math.hypot(initial[0]-agent_coordinates[0], initial[1]-agent_coordinates[1]) >= dist or cycles > CYCLE_LIMIT:
+                    agent_host.sendCommand("move 0")
+                    action_executing = False
+                    cycles = 0
+                    initial = None
+                    cmdIndex += 1
+        elif type == 'crouch':
+            param = cmd[1]
+            agent_host.sendCommand("crouch " + param)
+            crouching = True if 1 else False
+            cmdIndex += 1
+        elif type == 'pitch':
+            pitch = agent_info[u'Pitch']
+            speed = cmd[1]
+            dist = float(cmd[2])
+            correction_factor = 22.3576*0.05
+
+            if not action_executing:
+                action_executing = True
+                initial = pitch
+                agent_host.sendCommand("pitch " + speed)
+                if (float(speed) == 0 and dist != 0):
+                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
+            else:
+                if abs(pitch - initial + correction_factor) >= dist:
+                    agent_host.sendCommand("pitch 0")
+                    action_executing = False
+                    initial = None
+                    cmdIndex += 1
+                elif abs(pitch - initial) >= dist - 15:
+                    if pitch - initial > 0:
+                        agent_host.sendCommand("pitch 0.05")
+                    else:
+                        agent_host.sendCommand("pitch -0.05")
+                    
+        elif type == 'turn':
+            yaw = agent_info[u'Yaw']
+            absYaw = yaw if yaw > 0 else yaw + 360
+            speed = cmd[1]
+            speed_num = float(speed)
+            dist = float(cmd[2])
+            correction_factor = 26.9576*0.1
+
+            if not action_executing:
+                action_executing = True
+                agent_host.sendCommand("turn " + speed)
+                if (speed_num == 0 and dist != 0):
+                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
+                initial = speed_num/abs(speed_num) * dist + absYaw
+            else:
+                if absYaw < prev and speed_num > 0:
+                    rotations += 1
+                if absYaw > prev and speed_num < 0:
+                    rotations -= 1
+                if (absYaw + rotations*360 + correction_factor >= initial and speed_num > 0) or (absYaw + rotations*360 + correction_factor <= initial and speed_num < 0):
+                    agent_host.sendCommand("turn 0")
+                    action_executing = False
+                    initial = None
+                    rotations = 0
+                    cmdIndex += 1
+                elif(absYaw + rotations*360 >= initial - 15 and speed_num > 0) or (absYaw + rotations*360 <= initial + 15 and speed_num < 0):
+                    if speed_num > 0:
+                        agent_host.sendCommand("turn 0.1")
+                    else:
+                        agent_host.sendCommand("turn -0.1")
+            prev = absYaw
+        elif type == 'use':
+            agent_host.sendCommand("use 1")
+            time.sleep(0.1)
+            agent_host.sendCommand("use 0")
+            cmdIndex += 1
+        elif type == 'jump':
+            agent_host.sendCommand("jump 1")
+            time.sleep(0.1)
+            agent_host.sendCommand("jump 0")
+            cmdIndex = cmdIndex + 1
+        elif type == 'stall':
+            agent_host.sendCommand("move 0")
+            agent_host.sendCommand("pitch 0")
+            agent_host.sendCommand("turn 0")
+            cmdIndex += 1
+        else:
+            raise ValueError('The action \"' + policy[cmdIndex] + '\" is unknown or invalid')
+        
     for error in world_state.errors:
         print("Error:",error.text)
 
