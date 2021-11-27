@@ -10,7 +10,7 @@
         <Time><StartTime>1</StartTime></Time>
     </ServerInitialConditions>
     <ServerHandlers>
-      <FlatWorldGenerator generatorString="3;7,20*1,5*3,2;3;,biome_1"/>
+      <FlatWorldGenerator generatorString="3;7,20*1,5*3,2;3;,biome_1" forceReset="true"/>
       <DrawingDecorator>
         <!-- coordinates for cuboid are inclusive -->         <!-- limits of our arena -->
         <DrawCuboid x1="-25" y1="0" z1="25" x2="25" y2="25" z2="-25" type="air" />
@@ -30,7 +30,7 @@
   <AgentSection mode="Survival">
     <Name>Agent</Name>
     <AgentStart>
-      <Placement x="4.5" y="32" z="1.5" pitch="0" yaw="0"/>
+      <Placement x="4.5" y="32" z="1.5" pitch="83" yaw="180"/>
       <Inventory>
         <InventoryItem slot="0" type="stone" quantity="64"/>
       </Inventory>
@@ -51,7 +51,7 @@
         <Block reward="-100.0" type="lava" behaviour="onceOnly"/>
         <Block reward="100.0" type="lapis_block" behaviour="onceOnly"/>
       </RewardForTouchingBlockType>
-      <RewardForSendingCommand reward="-1" />
+      <RewardForTimeTaken initialReward="0.0" delta="-0.1" density="PER_TICK"/>
       <AgentQuitFromTouchingBlockType>
           <Block type="lava" />
           <Block type="lapis_block" />

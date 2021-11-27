@@ -72,6 +72,7 @@ class TabQAgent(object):
         self.q_table = {}
         self.canvas = canvas
         self.root = root
+        self.old_obs = {}
         
         self.rep = 0
 
@@ -89,12 +90,149 @@ class TabQAgent(object):
         """switch to evaluation mode (no training)"""
         self.training = False
 
+    def action_handler(self, world_state, agent_host, action_command):
+        cmdIndex = 0
+        action_executing = False
+        initial = None
+        prev = None
+        crouching = False
+        rotations = 0
+        cycles = 0
+
+        agent_host.sendCommand("crouch 1") #start off always crouching
+        crouching = True
+
+
+        cmd = action_command.split()
+        type = cmd[0]
+        # if cmdIndex < len(policy):
+        #     cmd = policy[cmdIndex].split() # Get next action in policy, otherwise stall
+        #     if not action_executing:
+        #         print("Executing command: " + policy[cmdIndex])
+        # if not action_executing:
+        #     action_executing = True
+        #     print("End of policy execution, stalling...")
+        #     agent_host.sendCommand("quit")
+        #     break
+        
+        if type == 'move':
+            # Get info about the user's current position
+            if world_state.number_of_observations_since_last_state > 0:
+                obs = json.loads(world_state.observations[-1].text)
+                self.old_obs = obs
+            else:
+                obs = self.old_obs
+            x = obs["XPos"]
+            y = obs["ZPos"]
+            agent_coordinates = [x, y]
+            
+            # Get command parameters
+            speed = cmd[1]
+            dist = float(cmd[2])
+            correction_factor = (1.186 if not crouching else 0.3696) * abs(float(speed))
+            CYCLE_LIMIT = 20 * dist
+
+            if not action_executing:
+                action_executing = True
+                initial = agent_coordinates
+                agent_host.sendCommand("move " + speed)
+                if (float(speed) == 0 and dist != 0):
+                    raise Exception("Action \"" + action_command + "\" is infeasible")
+            else:
+                cycles += 1
+                if math.hypot(initial[0]-agent_coordinates[0], initial[1]-agent_coordinates[1]) >= dist or cycles > CYCLE_LIMIT:
+                    agent_host.sendCommand("move 0")
+                    action_executing = False
+                    cycles = 0
+                    initial = None
+                    cmdIndex += 1
+        elif type == 'crouch':
+            param = cmd[1]
+            agent_host.sendCommand("crouch " + param)
+            crouching = True if 1 else False
+            cmdIndex += 1
+        elif type == 'pitch':
+            pitch = agent_info[u'Pitch']
+            speed = cmd[1]
+            dist = float(cmd[2])
+            correction_factor = 22.3576*0.05
+
+            if not action_executing:
+                action_executing = True
+                initial = pitch
+                agent_host.sendCommand("pitch " + speed)
+                if (float(speed) == 0 and dist != 0):
+                    raise Exception("Action \"" + action_command + "\" is infeasible")
+            else:
+                if abs(pitch - initial + correction_factor) >= dist:
+                    agent_host.sendCommand("pitch 0")
+                    action_executing = False
+                    initial = None
+                    cmdIndex += 1
+                elif abs(pitch - initial) >= dist - 15:
+                    if pitch - initial > 0:
+                        agent_host.sendCommand("pitch 0.05")
+                    else:
+                        agent_host.sendCommand("pitch -0.05")
+                    
+        elif type == 'turn':
+            yaw = agent_info[u'Yaw']
+            absYaw = yaw if yaw > 0 else yaw + 360
+            speed = cmd[1]
+            speed_num = float(speed)
+            dist = float(cmd[2])
+            correction_factor = 26.9576*0.1
+
+            if not action_executing:
+                action_executing = True
+                agent_host.sendCommand("turn " + speed)
+                if (speed_num == 0 and dist != 0):
+                    raise Exception("Action \"" + action_command + "\" is infeasible")
+                initial = speed_num/abs(speed_num) * dist + absYaw
+            else:
+                if absYaw < prev and speed_num > 0:
+                    rotations += 1
+                if absYaw > prev and speed_num < 0:
+                    rotations -= 1
+                if (absYaw + rotations*360 + correction_factor >= initial and speed_num > 0) or (absYaw + rotations*360 + correction_factor <= initial and speed_num < 0):
+                    agent_host.sendCommand("turn 0")
+                    action_executing = False
+                    initial = None
+                    rotations = 0
+                    cmdIndex += 1
+                elif(absYaw + rotations*360 >= initial - 15 and speed_num > 0) or (absYaw + rotations*360 <= initial + 15 and speed_num < 0):
+                    if speed_num > 0:
+                        agent_host.sendCommand("turn 0.1")
+                    else:
+                        agent_host.sendCommand("turn -0.1")
+            prev = absYaw
+        elif type == 'use':
+            agent_host.sendCommand("use 1")
+            time.sleep(0.1)
+            agent_host.sendCommand("use 0")
+            cmdIndex += 1
+        elif type == 'jump':
+            agent_host.sendCommand("jump 1")
+            time.sleep(0.1)
+            agent_host.sendCommand("jump 0")
+            cmdIndex = cmdIndex + 1
+        elif type == 'stall':
+            agent_host.sendCommand("move 0")
+            agent_host.sendCommand("pitch 0")
+            agent_host.sendCommand("turn 0")
+            cmdIndex += 1
+        else:
+            raise ValueError('The action \"' + action_command + '\" is unknown or invalid')
+
     def act(self, world_state, agent_host, current_r ):
         """take 1 action in response to the current world state"""
         
-        obs_text = world_state.observations[-1].text
-        obs = json.loads(obs_text) # most recent observation
-        self.logger.debug(obs)
+        if world_state.number_of_observations_since_last_state > 0:
+            obs = json.loads(world_state.observations[-1].text)
+            self.old_obs = obs
+        else:
+            obs = self.old_obs
+        #self.logger.debug(obs)
         if not u'XPos' in obs or not u'ZPos' in obs:
             self.logger.error("Incomplete observation received: %s" % obs_text)
             return 0
@@ -109,7 +247,7 @@ class TabQAgent(object):
             self.q_table[self.prev_s][self.prev_a] = old_q + self.alpha * (current_r
                 + self.gamma * max(self.q_table[current_s]) - old_q)
 
-        self.drawQ( curr_x = int(obs[u'XPos']), curr_y = int(obs[u'ZPos']) )
+        #self.drawQ( curr_x = int(obs[u'XPos']), curr_y = int(obs[u'ZPos']) )
 
         # select the next action
         rnd = random.random()
@@ -128,7 +266,9 @@ class TabQAgent(object):
             self.logger.info("Taking q action: %s" % self.actions[a])
 
         # send the selected action
-        agent_host.sendCommand(self.actions[a])
+        # agent_host.sendCommand(self.actions[a])
+        #print("Passing in action", self.actions[a], " to action handler")
+        self.action_handler(world_state, agent_host, self.actions[a])
         self.prev_s = current_s
         self.prev_a = a
 
@@ -149,9 +289,9 @@ class TabQAgent(object):
         while world_state.is_mission_running and all(e.text=='{}' for e in world_state.observations):
             world_state = agent_host.peekWorldState()
         # wait for a frame to arrive after that
-        num_frames_seen = world_state.number_of_video_frames_since_last_state
-        while world_state.is_mission_running and world_state.number_of_video_frames_since_last_state == num_frames_seen:
-            world_state = agent_host.peekWorldState()
+        # num_frames_seen = world_state.number_of_video_frames_since_last_state
+        # while world_state.is_mission_running and world_state.number_of_video_frames_since_last_state == num_frames_seen:
+        #     world_state = agent_host.peekWorldState()
         world_state = agent_host.getWorldState()
         for err in world_state.errors:
             print(err)
@@ -159,75 +299,82 @@ class TabQAgent(object):
         if not world_state.is_mission_running:
             return 0 # mission already ended
             
-        assert len(world_state.video_frames) > 0, 'No video frames!?'
+       # assert len(world_state.video_frames) > 0, 'No video frames!?'
         
-        obs = json.loads( world_state.observations[-1].text )
-        prev_x = obs[u'XPos']
-        prev_z = obs[u'ZPos']
-        print('Initial position:',prev_x,',',prev_z)
-        
-        if save_images:
-            # save the frame, for debugging
-            frame = world_state.video_frames[-1]
-            image = Image.frombytes('RGB', (frame.width, frame.height), bytes(frame.pixels) )
-            iFrame = 0
-            self.rep = self.rep + 1
-            image.save( 'rep_' + str(self.rep).zfill(3) + '_saved_frame_' + str(iFrame).zfill(4) + '.png' )
+        self.old_obs = json.loads( world_state.observations[-1].text )
+        prev_x = self.old_obs[u'XPos']
+        prev_z = self.old_obs[u'ZPos']
+        # if save_images:
+        #     # save the frame, for debugging
+        #     frame = world_state.video_frames[-1]
+        #     image = Image.frombytes('RGB', (frame.width, frame.height), bytes(frame.pixels) )
+        #     iFrame = 0
+        #     self.rep = self.rep + 1
+        #     image.save( 'rep_' + str(self.rep).zfill(3) + '_saved_frame_' + str(iFrame).zfill(4) + '.png' )
             
-        # take first action
+        # take first initial action
+        agent_host.sendCommand("crouch 1") #start off always crouching
+
         total_reward += self.act(world_state,agent_host,current_r)
         
         require_move = True
-        check_expected_position = True
+        check_expected_position = False
         
         # main loop:
+        i = 0
         while world_state.is_mission_running:
-        
+            #print("World state still running (", i, ")!:", json.loads(world_state.observations[-1].text))
+            #i += 1
             # wait for the position to have changed and a reward received
-            print('Waiting for data...', end=' ')
-            while True:
-                world_state = agent_host.peekWorldState()
-                if not world_state.is_mission_running:
-                    print('mission ended.')
-                    break
-                if len(world_state.rewards) > 0 and not all(e.text=='{}' for e in world_state.observations):
-                    obs = json.loads( world_state.observations[-1].text )
-                    curr_x = obs[u'XPos']
-                    curr_z = obs[u'ZPos']
-                    if require_move:
-                        if math.hypot( curr_x - prev_x, curr_z - prev_z ) > tol:
-                            print('received.')
-                            break
-                    else:
-                        print('received.')
-                        break
+            # print('Waiting for data...', end=' ')
+            # print("Current rewards: ", world_state.rewards)
+            # while True:
+            #     world_state = agent_host.peekWorldState()
+            #     if not world_state.is_mission_running:
+            #         print('mission ended.')
+            #         break
+            #     if len(world_state.rewards) > 0 and not all(e.text=='{}' for e in world_state.observations):
+            #         obs = json.loads( world_state.observations[-1].text )
+            #         curr_x = obs[u'XPos']
+            #         curr_z = obs[u'ZPos']
+            #         if require_move:
+            #             if math.hypot( curr_x - prev_x, curr_z - prev_z ) > tol:
+            #                 print('received.')
+            #                 break
+            #         else:
+            #             print('received.')
+            #             break
             # wait for a frame to arrive after that
-            num_frames_seen = world_state.number_of_video_frames_since_last_state
-            while world_state.is_mission_running and world_state.number_of_video_frames_since_last_state == num_frames_seen:
-                world_state = agent_host.peekWorldState()
+            # num_frames_seen = world_state.number_of_video_frames_since_last_state
+            # while world_state.is_mission_running and world_state.number_of_video_frames_since_last_state == num_frames_seen:
+            #     world_state = agent_host.peekWorldState()
                 
-            num_frames_before_get = len(world_state.video_frames)
+            # num_frames_before_get = len(world_state.video_frames)
             
             world_state = agent_host.getWorldState()
             for err in world_state.errors:
                 print(err)
             current_r = sum(r.getValue() for r in world_state.rewards)
 
-            if save_images:
-                # save the frame, for debugging
-                if world_state.is_mission_running:
-                    assert len(world_state.video_frames) > 0, 'No video frames!?'
-                    frame = world_state.video_frames[-1]
-                    image = Image.frombytes('RGB', (frame.width, frame.height), bytes(frame.pixels) )
-                    iFrame = iFrame + 1
-                    image.save( 'rep_' + str(self.rep).zfill(3) + '_saved_frame_' + str(iFrame).zfill(4) + '_after_' + self.actions[self.prev_a] + '.png' )
+            # if save_images:
+            #     # save the frame, for debugging
+            #     if world_state.is_mission_running:
+            #         assert len(world_state.video_frames) > 0, 'No video frames!?'
+            #         frame = world_state.video_frames[-1]
+            #         image = Image.frombytes('RGB', (frame.width, frame.height), bytes(frame.pixels) )
+            #         iFrame = iFrame + 1
+            #         image.save( 'rep_' + str(self.rep).zfill(3) + '_saved_frame_' + str(iFrame).zfill(4) + '_after_' + self.actions[self.prev_a] + '.png' )
                 
             if world_state.is_mission_running:
-                assert len(world_state.video_frames) > 0, 'No video frames!?'
-                num_frames_after_get = len(world_state.video_frames)
-                assert num_frames_after_get >= num_frames_before_get, 'Fewer frames after getWorldState!?'
-                frame = world_state.video_frames[-1]
-                obs = json.loads( world_state.observations[-1].text )
+                #assert len(world_state.video_frames) > 0, 'No video frames!?'
+                #num_frames_after_get = len(world_state.video_frames)
+                #assert num_frames_after_get >= num_frames_before_get, 'Fewer frames after getWorldState!?'
+                #frame = world_state.video_frames[-1]
+                if world_state.number_of_observations_since_last_state > 0:
+                    obs = json.loads( world_state.observations[-1].text )
+                    self.old_obs = obs
+                else:
+                    obs = self.old_obs
                 curr_x = obs[u'XPos']
                 curr_z = obs[u'ZPos']
                 print('New position from observation:',curr_x,',',curr_z,'after action:',self.actions[self.prev_a], end=' ') #NSWE
@@ -239,20 +386,21 @@ class TabQAgent(object):
                         input("Press Enter to continue...")
                     else:
                         print('as expected.')
-                    curr_x_from_render = frame.xPos
-                    curr_z_from_render = frame.zPos
-                    print('New position from render:',curr_x_from_render,',',curr_z_from_render,'after action:',self.actions[self.prev_a], end=' ') #NSWE
-                    if math.hypot( curr_x_from_render - expected_x, curr_z_from_render - expected_z ) > tol:
-                        print(' - ERROR DETECTED! Expected:',expected_x,',',expected_z)
-                        input("Press Enter to continue...")
-                    else:
-                        print('as expected.')
+                    #curr_x_from_render = frame.xPos
+                    #curr_z_from_render = frame.zPos
+                    #print('New position from render:',curr_x_from_render,',',curr_z_from_render,'after action:',self.actions[self.prev_a], end=' ') #NSWE
+                    # if math.hypot( curr_x_from_render - expected_x, curr_z_from_render - expected_z ) > tol:
+                    #     print(' - ERROR DETECTED! Expected:',expected_x,',',expected_z)
+                    #     input("Press Enter to continue...")
+                    # else:
+                    #     print('as expected.')
                 else:
                     print()
                 prev_x = curr_x
                 prev_z = curr_z
                 # act
-                total_reward += self.act(world_state, agent_host, current_r)
+                total_reward += self.act(world_state, agent_host, current_r) + 2 * (10 - self.old_obs["distanceFromend"])
+                print("Got back reward", total_reward)
                 
         # process final reward
         self.logger.debug("Final reward: %d" % current_r)
@@ -263,7 +411,7 @@ class TabQAgent(object):
             old_q = self.q_table[self.prev_s][self.prev_a]
             self.q_table[self.prev_s][self.prev_a] = old_q + self.alpha * ( current_r - old_q )
             
-        self.drawQ()
+        #self.drawQ()
     
         return total_reward
         
@@ -303,128 +451,128 @@ class TabQAgent(object):
         self.root.update()
 
 
-agent_host = MalmoPython.AgentHost()
+# agent_host = MalmoPython.AgentHost()
 
-# Find the default mission file by looking next to the schemas folder:
-schema_dir = None
-try:
-    schema_dir = os.environ['MALMO_XSD_PATH']
-except KeyError:
-    print("MALMO_XSD_PATH not set? Check environment.")
-    exit(1)
-mission_file = os.path.abspath(os.path.join(schema_dir, '..', 
-    'sample_missions', 'cliff_walking_1.xml')) # Integration test path
-if not os.path.exists(mission_file):
-    mission_file = os.path.abspath(os.path.join(schema_dir, '..', 
-        'Sample_missions', 'cliff_walking_1.xml')) # Install path
-if not os.path.exists(mission_file):
-    print("Could not find cliff_walking_1.xml under MALMO_XSD_PATH")
-    exit(1)
+# # Find the default mission file by looking next to the schemas folder:
+# schema_dir = None
+# try:
+#     schema_dir = os.environ['MALMO_XSD_PATH']
+# except KeyError:
+#     print("MALMO_XSD_PATH not set? Check environment.")
+#     exit(1)
+# mission_file = os.path.abspath(os.path.join(schema_dir, '..', 
+#     'sample_missions', 'cliff_walking_1.xml')) # Integration test path
+# if not os.path.exists(mission_file):
+#     mission_file = os.path.abspath(os.path.join(schema_dir, '..', 
+#         'Sample_missions', 'cliff_walking_1.xml')) # Install path
+# if not os.path.exists(mission_file):
+#     print("Could not find cliff_walking_1.xml under MALMO_XSD_PATH")
+#     exit(1)
 
-# add some args
-agent_host.addOptionalStringArgument('mission_file',
-    'Path/to/file from which to load the mission.', mission_file)
-agent_host.addOptionalFloatArgument('alpha',
-    'Learning rate of the Q-learning agent.', 0.1)
-agent_host.addOptionalFloatArgument('epsilon',
-    'Exploration rate of the Q-learning agent.', 0.01)
-agent_host.addOptionalFloatArgument('gamma', 'Discount factor.', 1.0)
-agent_host.addOptionalFlag('load_model', 'Load initial model from model_file.')
-agent_host.addOptionalStringArgument('model_file', 'Path to the initial model file', '')
-agent_host.addOptionalFlag('debug', 'Turn on debugging.')
+# # add some args
+# agent_host.addOptionalStringArgument('mission_file',
+#     'Path/to/file from which to load the mission.', mission_file)
+# agent_host.addOptionalFloatArgument('alpha',
+#     'Learning rate of the Q-learning agent.', 0.1)
+# agent_host.addOptionalFloatArgument('epsilon',
+#     'Exploration rate of the Q-learning agent.', 0.01)
+# agent_host.addOptionalFloatArgument('gamma', 'Discount factor.', 1.0)
+# agent_host.addOptionalFlag('load_model', 'Load initial model from model_file.')
+# agent_host.addOptionalStringArgument('model_file', 'Path to the initial model file', '')
+# agent_host.addOptionalFlag('debug', 'Turn on debugging.')
 
-malmoutils.parse_command_line(agent_host)
+# malmoutils.parse_command_line(agent_host)
 
-# -- set up the python-side drawing -- #
-scale = 40
-world_x = 6
-world_y = 14
-root = tk.Tk()
-root.wm_title("Q-table")
-canvas = tk.Canvas(root, width=world_x*scale, height=world_y*scale, borderwidth=0, highlightthickness=0, bg="black")
-canvas.grid()
-root.update()
+# # -- set up the python-side drawing -- #
+# scale = 40
+# world_x = 6
+# world_y = 14
+# root = tk.Tk()
+# root.wm_title("Q-table")
+# canvas = tk.Canvas(root, width=world_x*scale, height=world_y*scale, borderwidth=0, highlightthickness=0, bg="black")
+# canvas.grid()
+# root.update()
 
-if agent_host.receivedArgument("test"):
-    num_maps = 1
-else:
-    num_maps = 30000
+# if agent_host.receivedArgument("test"):
+#     num_maps = 1
+# else:
+#     num_maps = 30000
 
-for imap in range(num_maps):
+# for imap in range(num_maps):
 
-    # -- set up the agent -- #
-    actionSet = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
+#     # -- set up the agent -- #
+#     actionSet = ["movenorth 1", "movesouth 1", "movewest 1", "moveeast 1"]
 
-    agent = TabQAgent(
-        actions=actionSet,
-        epsilon=agent_host.getFloatArgument('epsilon'),
-        alpha=agent_host.getFloatArgument('alpha'),
-        gamma=agent_host.getFloatArgument('gamma'),
-        debug = agent_host.receivedArgument("debug"),
-        canvas = canvas,
-        root = root)
+#     agent = TabQAgent(
+#         actions=actionSet,
+#         epsilon=agent_host.getFloatArgument('epsilon'),
+#         alpha=agent_host.getFloatArgument('alpha'),
+#         gamma=agent_host.getFloatArgument('gamma'),
+#         debug = agent_host.receivedArgument("debug"),
+#         canvas = canvas,
+#         root = root)
 
-    # -- set up the mission -- #
-    mission_file = agent_host.getStringArgument('mission_file')
-    with open(mission_file, 'r') as f:
-        print("Loading mission from %s" % mission_file)
-        mission_xml = f.read()
-        my_mission = MalmoPython.MissionSpec(mission_xml, True)
-    my_mission.removeAllCommandHandlers()
-    my_mission.allowAllDiscreteMovementCommands()
-    my_mission.requestVideo( 320, 240 )
-    my_mission.setViewpoint( 1 )
-    # add holes for interest
-    for z in range(2,12,2):
-        x = random.randint(1,3)
-        my_mission.drawBlock( x,45,z,"lava")
+#     # -- set up the mission -- #
+#     mission_file = agent_host.getStringArgument('mission_file')
+#     with open(mission_file, 'r') as f:
+#         print("Loading mission from %s" % mission_file)
+#         mission_xml = f.read()
+#         my_mission = MalmoPython.MissionSpec(mission_xml, True)
+#     my_mission.removeAllCommandHandlers()
+#     my_mission.allowAllDiscreteMovementCommands()
+#     my_mission.requestVideo( 320, 240 )
+#     my_mission.setViewpoint( 1 )
+#     # add holes for interest
+#     for z in range(2,12,2):
+#         x = random.randint(1,3)
+#         my_mission.drawBlock( x,45,z,"lava")
 
-    my_clients = MalmoPython.ClientPool()
-    my_clients.add(MalmoPython.ClientInfo('127.0.0.1', 10000)) # add Minecraft machines here as available
+#     my_clients = MalmoPython.ClientPool()
+#     my_clients.add(MalmoPython.ClientInfo('127.0.0.1', 10000)) # add Minecraft machines here as available
 
-    max_retries = 3
-    agentID = 0
-    expID = 'tabular_q_learning'
+#     max_retries = 3
+#     agentID = 0
+#     expID = 'tabular_q_learning'
 
-    num_repeats = 150
-    cumulative_rewards = []
-    for i in range(num_repeats):
+#     num_repeats = 150
+#     cumulative_rewards = []
+#     for i in range(num_repeats):
         
-        print("\nMap %d - Mission %d of %d:" % ( imap, i+1, num_repeats ))
+#         print("\nMap %d - Mission %d of %d:" % ( imap, i+1, num_repeats ))
 
-        my_mission_record = malmoutils.get_default_recording_object(agent_host, "./save_%s-map%d-rep%d" % (expID, imap, i))
+#         my_mission_record = malmoutils.get_default_recording_object(agent_host, "./save_%s-map%d-rep%d" % (expID, imap, i))
 
-        for retry in range(max_retries):
-            try:
-                agent_host.startMission( my_mission, my_clients, my_mission_record, agentID, "%s-%d" % (expID, i) )
-                break
-            except RuntimeError as e:
-                if retry == max_retries - 1:
-                    print("Error starting mission:",e)
-                    exit(1)
-                else:
-                    time.sleep(2.5)
+#         for retry in range(max_retries):
+#             try:
+#                 agent_host.startMission( my_mission, my_clients, my_mission_record, agentID, "%s-%d" % (expID, i) )
+#                 break
+#             except RuntimeError as e:
+#                 if retry == max_retries - 1:
+#                     print("Error starting mission:",e)
+#                     exit(1)
+#                 else:
+#                     time.sleep(2.5)
 
-        print("Waiting for the mission to start", end=' ')
-        world_state = agent_host.getWorldState()
-        while not world_state.has_mission_begun:
-            print(".", end="")
-            time.sleep(0.1)
-            world_state = agent_host.getWorldState()
-            for error in world_state.errors:
-                print("Error:",error.text)
-        print()
+#         print("Waiting for the mission to start", end=' ')
+#         world_state = agent_host.getWorldState()
+#         while not world_state.has_mission_begun:
+#             print(".", end="")
+#             time.sleep(0.1)
+#             world_state = agent_host.getWorldState()
+#             for error in world_state.errors:
+#                 print("Error:",error.text)
+#         print()
 
-        # -- run the agent in the world -- #
-        cumulative_reward = agent.run(agent_host)
-        print('Cumulative reward: %d' % cumulative_reward)
-        cumulative_rewards += [ cumulative_reward ]
+#         # -- run the agent in the world -- #
+#         cumulative_reward = agent.run(agent_host)
+#         print('Cumulative reward: %d' % cumulative_reward)
+#         cumulative_rewards += [ cumulative_reward ]
 
-        # -- clean up -- #
-        time.sleep(0.5) # (let the Mod reset)
+#         # -- clean up -- #
+#         time.sleep(0.5) # (let the Mod reset)
 
-    print("Done.")
+#     print("Done.")
 
-    print()
-    print("Cumulative rewards for all %d runs:" % num_repeats)
-    print(cumulative_rewards)
+#     print()
+#     print("Cumulative rewards for all %d runs:" % num_repeats)
+#     print(cumulative_rewards)

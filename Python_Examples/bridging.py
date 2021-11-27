@@ -22,6 +22,8 @@ from __future__ import print_function
 
 from builtins import range
 import MalmoPython
+from MalmoPython import MissionRecordSpec
+import malmoutils
 from past.utils import old_div
 import os
 import sys
@@ -29,6 +31,7 @@ import time
 import json
 import tkinter as tk
 import math
+from tabular_q_learning import TabQAgent
 
 CANVAS_WIDTH = 390
 CANVAS_HEIGHT = 540
@@ -78,203 +81,201 @@ else:
     import functools
     print = functools.partial(print, flush=True)
 
-# Create default Malmo objects:
+# # Create default Malmo objects:
+
+# agent_host = MalmoPython.AgentHost()
+# try:
+#     agent_host.parse( sys.argv )
+# except RuntimeError as e:
+#     print('ERROR:',e)
+#     print(agent_host.getUsage())
+#     exit(1)
+# if agent_host.receivedArgument("help"):
+#     print(agent_host.getUsage())
+#     exit(0)
+
+# mission_file = './bridging.xml'
+# with open(mission_file, 'r') as f:
+#     print("Loading mission from %s" % mission_file)
+#     mission_xml = f.read()
+#     my_mission = MalmoPython.MissionSpec(mission_xml, True)
+# my_mission_record = MalmoPython.MissionRecordSpec()
+
+# # Attempt to start a mission:
+# max_retries = 3
+# for retry in range(max_retries):
+#     try:
+#         agent_host.startMission( my_mission, my_mission_record )
+#         break
+#     except RuntimeError as e:
+#         if retry == max_retries - 1:
+#             print("Error starting mission:",e)
+#             exit(1)
+#         else:
+#             time.sleep(2)
+
+# # Loop until mission starts:
+# print("Waiting for the mission to start ", end=' ')
+# world_state = agent_host.getWorldState()
+# while not world_state.has_mission_begun:
+#     print(".", end="")
+#     time.sleep(0.01)
+#     world_state = agent_host.getWorldState()
+#     for error in world_state.errors:
+#         print("Error:",error.text)
+
+# print()
+# print("Mission running ", end=' ')
+
+# policy = ["crouch 1", "turn 0.5 180", "pitch 0.25 83"]
+
+# for i in range(10):
+#     policy.append("move -1 1")
+#     policy.append("use")
+
+# policy.append("pitch -0.25 38")
+# policy.append("turn 0.5 180")
+# policy.append("crouch 0")
+# policy.append("move 1 1")
 
 agent_host = MalmoPython.AgentHost()
-try:
-    agent_host.parse( sys.argv )
-except RuntimeError as e:
-    print('ERROR:',e)
-    print(agent_host.getUsage())
-    exit(1)
-if agent_host.receivedArgument("help"):
-    print(agent_host.getUsage())
-    exit(0)
+mission_file = "./bridging.xml"
+# add some args
+agent_host.addOptionalStringArgument('mission_file',
+    'Path/to/file from which to load the mission.', mission_file)
+agent_host.addOptionalFloatArgument('alpha',
+    'Learning rate of the Q-learning agent.', 0.1)
+agent_host.addOptionalFloatArgument('epsilon',
+    'Exploration rate of the Q-learning agent.', 0.01)
+agent_host.addOptionalFloatArgument('gamma', 'Discount factor.', 1.0)
+agent_host.addOptionalFlag('load_model', 'Load initial model from model_file.')
+agent_host.addOptionalStringArgument('model_file', 'Path to the initial model file', '')
+agent_host.addOptionalFlag('debug', 'Turn on debugging.')
 
-mission_file = './bridging.xml'
+
+# -- set up the agent -- #
+actionSet = ["crouch 1","crouch 0", "move -1 1", "use"]
+
+agent = TabQAgent(
+    actions=actionSet,
+    epsilon=0.01, #agent_host.getFloatArgument('epsilon'),
+    alpha=0.1, #agent_host.getFloatArgument('alpha'),
+    gamma=1.0, #agent_host.getFloatArgument('gamma'),
+    debug = True, #agent_host.receivedArgument("debug"),
+    canvas = canvas,
+    root = root)
+
+# -- set up the mission -- #
+mission_file = "./bridging.xml"
 with open(mission_file, 'r') as f:
     print("Loading mission from %s" % mission_file)
     mission_xml = f.read()
     my_mission = MalmoPython.MissionSpec(mission_xml, True)
-my_mission_record = MalmoPython.MissionRecordSpec()
+my_mission.removeAllCommandHandlers()
+my_mission.allowAllDiscreteMovementCommands()
+#my_mission.requestVideo( 320, 240 )
+my_mission.setViewpoint( 1 )
 
-# Attempt to start a mission:
+my_clients = MalmoPython.ClientPool()
+my_clients.add(MalmoPython.ClientInfo('127.0.0.1', 10000)) # add Minecraft machines here as available
+
 max_retries = 3
-for retry in range(max_retries):
-    try:
-        agent_host.startMission( my_mission, my_mission_record )
-        break
-    except RuntimeError as e:
-        if retry == max_retries - 1:
-            print("Error starting mission:",e)
-            exit(1)
-        else:
-            time.sleep(2)
+agentID = 0
+expID = 'tabular_q_learning'
 
-# Loop until mission starts:
-print("Waiting for the mission to start ", end=' ')
-world_state = agent_host.getWorldState()
-while not world_state.has_mission_begun:
-    print(".", end="")
-    time.sleep(0.01)
+num_repeats = 150
+cumulative_rewards = []
+for i in range(num_repeats):
+    
+    print("\nMission %d of %d:" % ( i+1, num_repeats )) #print("\nMap %d - Mission %d of %d:" % ( imap, i+1, num_repeats ))
+
+    my_mission_record = MissionRecordSpec() #malmoutils.get_default_recording_object(agent_host, "./save_%s-rep%d" % (expID, i))
+
+    for retry in range(max_retries):
+        try:
+            agent_host.startMission( my_mission, my_clients, my_mission_record, agentID, "%s-%d" % (expID, i) )
+            break
+        except RuntimeError as e:
+            if retry == max_retries - 1:
+                print("Error starting mission:",e)
+                exit(1)
+            else:
+                time.sleep(2.5)
+
+    print("Waiting for the mission to start", end=' ')
     world_state = agent_host.getWorldState()
-    for error in world_state.errors:
-        print("Error:",error.text)
+    while not world_state.has_mission_begun:
+        print(".", end="")
+        time.sleep(0.1)
+        world_state = agent_host.getWorldState()
+        for error in world_state.errors:
+            print("Error:",error.text)
+    print()
+
+    # -- run the agent in the world -- #
+    cumulative_reward = agent.run(agent_host)
+    print('Cumulative reward: %d' % cumulative_reward)
+    cumulative_rewards += [ cumulative_reward ]
+
+    # -- clean up -- #
+    time.sleep(0.5) # (let the Mod reset)
+
+print("Done.")
 
 print()
-print("Mission running ", end=' ')
+print("Cumulative rewards for all %d runs:" % num_repeats)
+print(cumulative_rewards)
 
-policy = ["crouch 1", "turn 0.5 180", "pitch 0.25 83"]
 
-for i in range(10):
-    policy.append("move -1 1")
-    policy.append("use")
 
-policy.append("pitch -0.25 38")
-policy.append("turn 0.5 180")
-policy.append("crouch 0")
-policy.append("move 1 1")
 
-cmdIndex = 0
-action_executing = False
-initial = None
-prev = None
-crouching = False
-rotations = 0
-cycles = 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Loop until mission ends:
-while world_state.is_mission_running:
-    time.sleep(0.01)
-    world_state = agent_host.getWorldState()
-    if world_state.number_of_observations_since_last_state > 0: # Have any observations come in?
-        msg = world_state.observations[-1].text                 # Yes, so get the text
-        agent_info = json.loads(msg)                          # and parse the JSON
-        grid = agent_info['floor3x3']
-        distance = agent_info['distanceFromend']
-        x = agent_info["XPos"]
-        y = agent_info["ZPos"]
+# while world_state.is_mission_running:
+#     time.sleep(0.01)
+#     world_state = agent_host.getWorldState()
+#     if world_state.number_of_observations_since_last_state > 0: # Have any observations come in?
+#         msg = world_state.observations[-1].text                 # Yes, so get the text
+#         agent_info = json.loads(msg)                          # and parse the JSON
+#         grid = agent_info['floor3x3']
+#         distance = agent_info['distanceFromend']
+#         x = agent_info["XPos"]
+#         y = agent_info["ZPos"]
 
-        updateBlocks(x, y, grid[4]=="stone")
-        #print(distance)
-        #print(grid)
+#         updateBlocks(x, y, grid[4]=="stone")
+#         #print(distance)
+#         #print(grid)
 
-        cmd = ['stall']
-        if cmdIndex < len(policy):
-            cmd = policy[cmdIndex].split() # Get next action in policy, otherwise stall
-            if not action_executing:
-                print("Executing command: " + policy[cmdIndex])
-        elif not action_executing:
-            action_executing = True
-            print("End of policy execution, stalling...")
-            agent_host.sendCommand("quit")
 
-        type = cmd[0]
-        if type == 'move':
-            # Get info about the user's current position
-            agent_coordinates = [x, y]
-            
-            # Get command parameters
-            speed = cmd[1]
-            dist = float(cmd[2])
-            correction_factor = (1.186 if not crouching else 0.3696) * abs(float(speed))
-            CYCLE_LIMIT = 20 * dist
-
-            if not action_executing:
-                action_executing = True
-                initial = agent_coordinates
-                agent_host.sendCommand("move " + speed)
-                if (float(speed) == 0 and dist != 0):
-                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
-            else:
-                cycles += 1
-                if math.hypot(initial[0]-agent_coordinates[0], initial[1]-agent_coordinates[1]) >= dist or cycles > CYCLE_LIMIT:
-                    agent_host.sendCommand("move 0")
-                    action_executing = False
-                    cycles = 0
-                    initial = None
-                    cmdIndex += 1
-        elif type == 'crouch':
-            param = cmd[1]
-            agent_host.sendCommand("crouch " + param)
-            crouching = True if 1 else False
-            cmdIndex += 1
-        elif type == 'pitch':
-            pitch = agent_info[u'Pitch']
-            speed = cmd[1]
-            dist = float(cmd[2])
-            correction_factor = 22.3576*0.05
-
-            if not action_executing:
-                action_executing = True
-                initial = pitch
-                agent_host.sendCommand("pitch " + speed)
-                if (float(speed) == 0 and dist != 0):
-                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
-            else:
-                if abs(pitch - initial + correction_factor) >= dist:
-                    agent_host.sendCommand("pitch 0")
-                    action_executing = False
-                    initial = None
-                    cmdIndex += 1
-                elif abs(pitch - initial) >= dist - 15:
-                    if pitch - initial > 0:
-                        agent_host.sendCommand("pitch 0.05")
-                    else:
-                        agent_host.sendCommand("pitch -0.05")
-                    
-        elif type == 'turn':
-            yaw = agent_info[u'Yaw']
-            absYaw = yaw if yaw > 0 else yaw + 360
-            speed = cmd[1]
-            speed_num = float(speed)
-            dist = float(cmd[2])
-            correction_factor = 26.9576*0.1
-
-            if not action_executing:
-                action_executing = True
-                agent_host.sendCommand("turn " + speed)
-                if (speed_num == 0 and dist != 0):
-                    raise Exception("Action \"" + policy[cmdIndex] + "\" is infeasible")
-                initial = speed_num/abs(speed_num) * dist + absYaw
-            else:
-                if absYaw < prev and speed_num > 0:
-                    rotations += 1
-                if absYaw > prev and speed_num < 0:
-                    rotations -= 1
-                if (absYaw + rotations*360 + correction_factor >= initial and speed_num > 0) or (absYaw + rotations*360 + correction_factor <= initial and speed_num < 0):
-                    agent_host.sendCommand("turn 0")
-                    action_executing = False
-                    initial = None
-                    rotations = 0
-                    cmdIndex += 1
-                elif(absYaw + rotations*360 >= initial - 15 and speed_num > 0) or (absYaw + rotations*360 <= initial + 15 and speed_num < 0):
-                    if speed_num > 0:
-                        agent_host.sendCommand("turn 0.1")
-                    else:
-                        agent_host.sendCommand("turn -0.1")
-            prev = absYaw
-        elif type == 'use':
-            agent_host.sendCommand("use 1")
-            time.sleep(0.1)
-            agent_host.sendCommand("use 0")
-            cmdIndex += 1
-        elif type == 'jump':
-            agent_host.sendCommand("jump 1")
-            time.sleep(0.1)
-            agent_host.sendCommand("jump 0")
-            cmdIndex = cmdIndex + 1
-        elif type == 'stall':
-            agent_host.sendCommand("move 0")
-            agent_host.sendCommand("pitch 0")
-            agent_host.sendCommand("turn 0")
-            cmdIndex += 1
-        else:
-            raise ValueError('The action \"' + policy[cmdIndex] + '\" is unknown or invalid')
         
-    for error in world_state.errors:
-        print("Error:",error.text)
+#     for error in world_state.errors:
+#         print("Error:",error.text)
 
-print()
-print("Mission ended")
+# print()
+# print("Mission ended")
 # Mission has ended.
