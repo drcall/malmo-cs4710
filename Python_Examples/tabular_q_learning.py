@@ -99,7 +99,7 @@ class TabQAgent(object):
         rotations = 0
         cycles = 0
 
-        agent_host.sendCommand("crouch 1") #start off always crouching
+        #agent_host.sendCommand("crouch 1") #start off always crouching
         crouching = True
 
 
@@ -147,9 +147,10 @@ class TabQAgent(object):
                     initial = None
                     cmdIndex += 1
         elif type == 'crouch':
+            print("Beginning crouch")
             param = cmd[1]
             agent_host.sendCommand("crouch " + param)
-            crouching = True if 1 else False
+            crouching = True if param=="1" else False
             cmdIndex += 1
         elif type == 'pitch':
             pitch = agent_info[u'Pitch']

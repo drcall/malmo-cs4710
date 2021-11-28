@@ -155,7 +155,7 @@ agent_host.addOptionalFlag('debug', 'Turn on debugging.')
 
 # -- set up the agent -- #
 #actionSet = ["crouch 1","crouch 0", "move -1 1", "use"]
-actionSet = ["crouch 1", "crouch 1", "crouch 1"]
+actionSet = ["move -1 1", "use", "crouch 1", "crouch 0"]
 
 agent = TabQAgent(
     actions=actionSet,
@@ -172,8 +172,8 @@ with open(mission_file, 'r') as f:
     print("Loading mission from %s" % mission_file)
     mission_xml = f.read()
     my_mission = MalmoPython.MissionSpec(mission_xml, True)
-my_mission.removeAllCommandHandlers()
-my_mission.allowAllDiscreteMovementCommands()
+#my_mission.removeAllCommandHandlers()
+#my_mission.allowAllDiscreteMovementCommands()
 #my_mission.requestVideo( 320, 240 )
 my_mission.setViewpoint( 1 )
 
