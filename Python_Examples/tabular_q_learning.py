@@ -321,7 +321,6 @@ class TabQAgent(object):
         check_expected_position = False
         
         # main loop:
-        i = 0
         while world_state.is_mission_running:
             #print("World state still running (", i, ")!:", json.loads(world_state.observations[-1].text))
             #i += 1
@@ -399,8 +398,9 @@ class TabQAgent(object):
                 prev_x = curr_x
                 prev_z = curr_z
                 # act
-                total_reward += self.act(world_state, agent_host, current_r) + 2 * (10 - self.old_obs["distanceFromend"])
-                print("Got back reward", total_reward)
+                new_reward = self.act(world_state, agent_host, current_r) + 2 * (10 - self.old_obs["distanceFromend"])
+                total_reward += new_reward
+                print("Got back reward", new_reward)
                 
         # process final reward
         self.logger.debug("Final reward: %d" % current_r)

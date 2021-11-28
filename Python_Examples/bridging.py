@@ -154,7 +154,8 @@ agent_host.addOptionalFlag('debug', 'Turn on debugging.')
 
 
 # -- set up the agent -- #
-actionSet = ["crouch 1","crouch 0", "move -1 1", "use"]
+#actionSet = ["crouch 1","crouch 0", "move -1 1", "use"]
+actionSet = ["crouch 1", "crouch 1", "crouch 1"]
 
 agent = TabQAgent(
     actions=actionSet,
@@ -189,6 +190,7 @@ for i in range(num_repeats):
     
     print("\nMission %d of %d:" % ( i+1, num_repeats )) #print("\nMap %d - Mission %d of %d:" % ( imap, i+1, num_repeats ))
 
+    #Make an empty mission record object that won't get used
     my_mission_record = MissionRecordSpec() #malmoutils.get_default_recording_object(agent_host, "./save_%s-rep%d" % (expID, i))
 
     for retry in range(max_retries):
