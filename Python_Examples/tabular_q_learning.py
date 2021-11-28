@@ -69,10 +69,18 @@ class TabQAgent(object):
         self.logger.addHandler(logging.StreamHandler(sys.stdout))
 
         self.actions = actions
+        self.action_executing = False
         self.q_table = {}
         self.canvas = canvas
         self.root = root
         self.old_obs = {}
+
+        self.cmdIndex = 0
+        self.initial = None
+        self.prev = None
+        self.crouching = False
+        self.rotations = 0
+        self.cycles = 0
         
         self.rep = 0
 
@@ -91,13 +99,6 @@ class TabQAgent(object):
         self.training = False
 
     def action_handler(self, world_state, agent_host, action_command):
-        cmdIndex = 0
-        action_executing = False
-        initial = None
-        prev = None
-        crouching = False
-        rotations = 0
-        cycles = 0
 
         #agent_host.sendCommand("crouch 1") #start off always crouching
         crouching = True
@@ -107,21 +108,22 @@ class TabQAgent(object):
         type = cmd[0]
         # if cmdIndex < len(policy):
         #     cmd = policy[cmdIndex].split() # Get next action in policy, otherwise stall
-        #     if not action_executing:
+        #     if not self.action_executing:
         #         print("Executing command: " + policy[cmdIndex])
-        # if not action_executing:
-        #     action_executing = True
+        # if not self.action_executing:
+        #     self.action_executing = True
         #     print("End of policy execution, stalling...")
         #     agent_host.sendCommand("quit")
         #     break
+
+        if world_state.number_of_observations_since_last_state > 0:
+            obs = json.loads(world_state.observations[-1].text)
+            self.old_obs = obs
+        else:
+            obs = self.old_obs
         
         if type == 'move':
             # Get info about the user's current position
-            if world_state.number_of_observations_since_last_state > 0:
-                obs = json.loads(world_state.observations[-1].text)
-                self.old_obs = obs
-            else:
-                obs = self.old_obs
             x = obs["XPos"]
             y = obs["ZPos"]
             agent_coordinates = [x, y]
@@ -131,77 +133,76 @@ class TabQAgent(object):
             dist = float(cmd[2])
             correction_factor = (1.186 if not crouching else 0.3696) * abs(float(speed))
             CYCLE_LIMIT = 20 * dist
-
-            if not action_executing:
-                action_executing = True
-                initial = agent_coordinates
+            if not self.action_executing:
+                self.action_executing = True
+                self.initial = agent_coordinates
                 agent_host.sendCommand("move " + speed)
                 if (float(speed) == 0 and dist != 0):
                     raise Exception("Action \"" + action_command + "\" is infeasible")
             else:
-                cycles += 1
-                if math.hypot(initial[0]-agent_coordinates[0], initial[1]-agent_coordinates[1]) >= dist or cycles > CYCLE_LIMIT:
+                self.cycles += 1
+                if math.hypot(self.initial[0]-agent_coordinates[0], self.initial[1]-agent_coordinates[1]) >= dist or self.cycles > CYCLE_LIMIT:
                     agent_host.sendCommand("move 0")
-                    action_executing = False
-                    cycles = 0
-                    initial = None
-                    cmdIndex += 1
+                    self.action_executing = False
+                    self.cycles = 0
+                    self.initial = None
+                    self.cmdIndex += 1
         elif type == 'crouch':
             print("Beginning crouch")
             param = cmd[1]
             agent_host.sendCommand("crouch " + param)
             crouching = True if param=="1" else False
-            cmdIndex += 1
+            self.cmdIndex += 1
         elif type == 'pitch':
-            pitch = agent_info[u'Pitch']
+            pitch = obs[u'Pitch']
             speed = cmd[1]
             dist = float(cmd[2])
             correction_factor = 22.3576*0.05
 
-            if not action_executing:
-                action_executing = True
-                initial = pitch
+            if not self.action_executing:
+                self.action_executing = True
+                self.initial = pitch
                 agent_host.sendCommand("pitch " + speed)
                 if (float(speed) == 0 and dist != 0):
                     raise Exception("Action \"" + action_command + "\" is infeasible")
             else:
-                if abs(pitch - initial + correction_factor) >= dist:
+                if abs(pitch - self.initial + correction_factor) >= dist:
                     agent_host.sendCommand("pitch 0")
-                    action_executing = False
-                    initial = None
-                    cmdIndex += 1
-                elif abs(pitch - initial) >= dist - 15:
-                    if pitch - initial > 0:
+                    self.action_executing = False
+                    self.initial = None
+                    self.cmdIndex += 1
+                elif abs(pitch - self.initial) >= dist - 15:
+                    if pitch - self.initial > 0:
                         agent_host.sendCommand("pitch 0.05")
                     else:
                         agent_host.sendCommand("pitch -0.05")
                     
         elif type == 'turn':
-            yaw = agent_info[u'Yaw']
+            yaw = obs[u'Yaw']
             absYaw = yaw if yaw > 0 else yaw + 360
             speed = cmd[1]
             speed_num = float(speed)
             dist = float(cmd[2])
             correction_factor = 26.9576*0.1
 
-            if not action_executing:
-                action_executing = True
+            if not self.action_executing:
+                self.action_executing = True
                 agent_host.sendCommand("turn " + speed)
                 if (speed_num == 0 and dist != 0):
                     raise Exception("Action \"" + action_command + "\" is infeasible")
-                initial = speed_num/abs(speed_num) * dist + absYaw
+                self.initial = speed_num/abs(speed_num) * dist + absYaw
             else:
-                if absYaw < prev and speed_num > 0:
-                    rotations += 1
-                if absYaw > prev and speed_num < 0:
-                    rotations -= 1
-                if (absYaw + rotations*360 + correction_factor >= initial and speed_num > 0) or (absYaw + rotations*360 + correction_factor <= initial and speed_num < 0):
+                if absYaw < self.prev and speed_num > 0:
+                    self.rotations += 1
+                if absYaw > self.prev and speed_num < 0:
+                    self.rotations -= 1
+                if (absYaw + self.rotations*360 + correction_factor >= self.initial and speed_num > 0) or (absYaw + self.rotations*360 + correction_factor <= self.initial and speed_num < 0):
                     agent_host.sendCommand("turn 0")
-                    action_executing = False
-                    initial = None
-                    rotations = 0
-                    cmdIndex += 1
-                elif(absYaw + rotations*360 >= initial - 15 and speed_num > 0) or (absYaw + rotations*360 <= initial + 15 and speed_num < 0):
+                    self.action_executing = False
+                    self.initial = None
+                    self.rotations = 0
+                    self.cmdIndex += 1
+                elif(absYaw + self.rotations*360 >= self.initial - 15 and speed_num > 0) or (absYaw + self.rotations*360 <= self.initial + 15 and speed_num < 0):
                     if speed_num > 0:
                         agent_host.sendCommand("turn 0.1")
                     else:
@@ -211,23 +212,22 @@ class TabQAgent(object):
             agent_host.sendCommand("use 1")
             time.sleep(0.1)
             agent_host.sendCommand("use 0")
-            cmdIndex += 1
+            self.cmdIndex += 1
         elif type == 'jump':
             agent_host.sendCommand("jump 1")
             time.sleep(0.1)
             agent_host.sendCommand("jump 0")
-            cmdIndex = cmdIndex + 1
+            self.cmdIndex += 1
         elif type == 'stall':
             agent_host.sendCommand("move 0")
             agent_host.sendCommand("pitch 0")
             agent_host.sendCommand("turn 0")
-            cmdIndex += 1
+            self.cmdIndex += 1
         else:
             raise ValueError('The action \"' + action_command + '\" is unknown or invalid')
 
     def act(self, world_state, agent_host, current_r ):
         """take 1 action in response to the current world state"""
-        
         if world_state.number_of_observations_since_last_state > 0:
             obs = json.loads(world_state.observations[-1].text)
             self.old_obs = obs
@@ -243,7 +243,7 @@ class TabQAgent(object):
             self.q_table[current_s] = ([0] * len(self.actions))
 
         # update Q values
-        if self.training and self.prev_s is not None and self.prev_a is not None:
+        if self.training and self.prev_s is not None and self.prev_a is not None and not self.action_executing:
             old_q = self.q_table[self.prev_s][self.prev_a]
             self.q_table[self.prev_s][self.prev_a] = old_q + self.alpha * (current_r
                 + self.gamma * max(self.q_table[current_s]) - old_q)
@@ -251,36 +251,40 @@ class TabQAgent(object):
         #self.drawQ( curr_x = int(obs[u'XPos']), curr_y = int(obs[u'ZPos']) )
 
         # select the next action
-        rnd = random.random()
-        if rnd < self.epsilon:
-            a = random.randint(0, len(self.actions) - 1)
-            self.logger.info("Random action: %s" % self.actions[a])
+        if not self.action_executing:
+            rnd = random.random()
+            if rnd < self.epsilon:
+                a = random.randint(0, len(self.actions) - 1)
+                self.logger.info("Random action: %s" % self.actions[a])
+            else:
+                m = max(self.q_table[current_s])
+                self.logger.debug("Current values: %s" % ",".join(str(x) for x in self.q_table[current_s]))
+                l = list()
+                for x in range(0, len(self.actions)):
+                    if self.q_table[current_s][x] == m:
+                        l.append(x)
+                y = random.randint(0, len(l)-1)
+                a = l[y]
+                self.logger.info("Taking q action: %s" % self.actions[a])
         else:
-            m = max(self.q_table[current_s])
-            self.logger.debug("Current values: %s" % ",".join(str(x) for x in self.q_table[current_s]))
-            l = list()
-            for x in range(0, len(self.actions)):
-                if self.q_table[current_s][x] == m:
-                    l.append(x)
-            y = random.randint(0, len(l)-1)
-            a = l[y]
-            self.logger.info("Taking q action: %s" % self.actions[a])
+            a = self.prev_a
 
         # send the selected action
         # agent_host.sendCommand(self.actions[a])
-        #print("Passing in action", self.actions[a], " to action handler")
+        print("Passing in action", self.actions[a], " to action handler")
+        print("Action already running: " + str(self.action_executing))
         self.action_handler(world_state, agent_host, self.actions[a])
         self.prev_s = current_s
         self.prev_a = a
 
-        return current_r
+        return current_r if not self.action_executing else 0.0
 
     def run(self, agent_host):
         """run the agent on the world"""
-
         total_reward = 0
         current_r = 0
         tol = 0.01
+        self.action_executing = False
         
         self.prev_s = None
         self.prev_a = None
@@ -377,7 +381,7 @@ class TabQAgent(object):
                     obs = self.old_obs
                 curr_x = obs[u'XPos']
                 curr_z = obs[u'ZPos']
-                print('New position from observation:',curr_x,',',curr_z,'after action:',self.actions[self.prev_a], end=' ') #NSWE
+                #print('New position from observation:',curr_x,',',curr_z,'after action:',self.actions[self.prev_a], end=' ') #NSWE
                 if check_expected_position:
                     expected_x = prev_x + [0,0,-1,1][self.prev_a]
                     expected_z = prev_z + [-1,1,0,0][self.prev_a]
@@ -395,7 +399,8 @@ class TabQAgent(object):
                     # else:
                     #     print('as expected.')
                 else:
-                    print()
+                    pass
+                    #print()
                 prev_x = curr_x
                 prev_z = curr_z
                 # act

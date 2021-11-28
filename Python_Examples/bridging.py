@@ -155,7 +155,7 @@ agent_host.addOptionalFlag('debug', 'Turn on debugging.')
 
 # -- set up the agent -- #
 #actionSet = ["crouch 1","crouch 0", "move -1 1", "use"]
-actionSet = ["move -1 1", "use", "crouch 1", "crouch 0"]
+actionSet = ["move -1 0.5", "use", "crouch 1", "crouch 0"]
 
 agent = TabQAgent(
     actions=actionSet,
